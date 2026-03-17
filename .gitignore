@@ -1,0 +1,40 @@
+# Environment variables
+.env
+.env.local
+.venv
+env/
+venv/
+
+# Google Fit credentials
+credentials.json
+token.pickle
+
+# IDE
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+*.egg-info/
+
+# Data files
+data/raw/*.csv
+data/processed/*.csv
+
+# Logs
+*.log
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
