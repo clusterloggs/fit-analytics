@@ -1,6 +1,6 @@
 # Fitness Analytics
 
-Fitness Analytics is a Python-based analytics platform that integrates with Google Fit to automatically collect, clean, process, and forecast personal fitness metrics. It provides a complete data pipeline with automated quality checks, advanced feature engineering, predictive models, and an interactive web dashboard for visualizing trends and predictions across steps, heart rate, sleep, calories, and weight.
+Fitness Analytics is a Python-based analytics platform that integrates with Google Fit to automatically collect, clean, process, and forecast personal fitness metrics. It provides a complete data pipeline with automated quality checks and an interactive web dashboard for visualising trends across steps, heart rate, sleep, calories.
 
 ## Table of Contents
 
