@@ -6,17 +6,17 @@ import sys
 import os
 from pathlib import Path
 import logging
+from sqlalchemy import create_engine
 from datetime import datetime
 
 # Setup paths
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 
-from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, DATA_RETENTION_DAYS
+from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, DATA_RETENTION_DAYS, DATABASE_FILE
 from src.data_importer import FitnessDataImporter
 from src.data_cleaner import FitnessDataCleaner
 from src.data_processor import FitnessDataProcessor
-from src.predictive_analytics import FitnessPredictor
 
 # Setup logging
 logging.basicConfig(
@@ -37,33 +37,36 @@ class FitnessAnalyticsPipeline:
         self.importer = FitnessDataImporter()
         self.cleaner = FitnessDataCleaner()
         self.processor = FitnessDataProcessor()
-        self.predictor = FitnessPredictor()
     
-    def run_full_pipeline(self, days_back: int = 30, save_intermediate: bool = True):
+    def run_full_pipeline(self, days_back: int = 30, save_intermediate: bool = True, fetch_new: bool = True):
         """
         Run the complete analytics pipeline
         
         Args:
             days_back: Number of days to retrieve
             save_intermediate: Save intermediate results
+            fetch_new: Whether to fetch new data from API or load local
         """
         logger.info("=" * 60)
         logger.info("Starting Fitness Analytics Pipeline")
         logger.info("=" * 60)
         
         # Step 1: Data Import
-        logger.info("\n[STEP 1] Importing data from Google Fit...")
-        raw_data = self.importer.import_all_data(days_back=days_back)
+        if fetch_new:
+            logger.info("\n[STEP 1] Importing data from Google Fit...")
+            raw_data = self.importer.import_all_data(days_back=days_back)
+            if save_intermediate:
+                logger.info("Saving raw data...")
+                self.importer.save_raw_data()
+        else:
+            logger.info("\n[STEP 1] Loading local data (skipping API)...")
+            raw_data = self.importer.load_local_data()
         
         if not raw_data:
-            logger.error("Failed to import data. Check Google Fit credentials.")
+            logger.error("No data found to process.")
             return False
         
         logger.info(f"Successfully imported {len(raw_data)} data types")
-        
-        if save_intermediate:
-            logger.info("Saving raw data...")
-            self.importer.save_raw_data()
         
         # Step 2: Data Cleaning
         logger.info("\n[STEP 2] Cleaning data...")
@@ -75,12 +78,8 @@ class FitnessAnalyticsPipeline:
         processed_data = self._process_all_data(cleaned_data)
         logger.info(f"Processed {len(processed_data)} datasets")
         
-        # Step 4: Predictive Analytics
-        logger.info("\n[STEP 4] Training predictive models...")
-        self._train_all_models(processed_data)
-        
-        # Step 5: Save processed data
-        logger.info("\n[STEP 5] Saving processed data...")
+        # Step 4: Save processed data
+        logger.info("\n[STEP 4] Saving processed data...")
         self._save_processed_data(processed_data)
         
         logger.info("\n" + "=" * 60)
@@ -109,8 +108,6 @@ class FitnessAnalyticsPipeline:
                 df = self.cleaner.clean_sleep(df)
             elif data_type == 'calories':
                 df = self.cleaner.clean_calories(df)
-            elif data_type == 'weight':
-                df = self.cleaner.clean_weight(df)
             
             # Apply general cleaning
             df = self.cleaner.remove_duplicates(df)
@@ -136,8 +133,6 @@ class FitnessAnalyticsPipeline:
                 df = self.processor.aggregate_daily(df, metric='sum')
             elif data_type == 'calories':
                 df = self.processor.aggregate_daily(df, metric='sum')
-            elif data_type == 'weight':
-                df = self.processor.aggregate_daily(df, metric='mean')
             
             # Add features
             df = self.processor.calculate_moving_averages(df)
@@ -148,27 +143,16 @@ class FitnessAnalyticsPipeline:
         
         return processed
     
-    def _train_all_models(self, processed_data):
-        """Train predictive models"""
-        for metric_name, df in processed_data.items():
-            if len(df) > 10:
-                logger.info(f"Training model for {metric_name}...")
-                result = self.predictor.train_forecast_model(
-                    df,
-                    metric_name=metric_name,
-                    forecast_days=7
-                )
-                if result:
-                    logger.info(f"Model R² Score: {result['test_r2']:.3f}")
-    
     def _save_processed_data(self, processed_data):
-        """Save processed data to CSV"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        """Save processed data to SQL database"""
+        engine = create_engine(f"sqlite:///{DATABASE_FILE}")
+        logger.info(f"Connecting to database: {DATABASE_FILE}")
         
         for data_type, df in processed_data.items():
-            filename = PROCESSED_DATA_DIR / f"{data_type}_processed_{timestamp}.csv"
-            df.to_csv(filename, index=False)
-            logger.info(f"Saved {data_type} to {filename}")
+            logger.info(f"Saving {data_type} to SQL table...")
+            # Use 'replace' to overwrite the table on each pipeline run
+            df.to_sql(data_type, engine, if_exists='replace', index=False)
+            logger.info(f"Saved {len(df)} records for {data_type} to table '{data_type}'")
 
 
 def main():
@@ -179,13 +163,16 @@ def main():
     parser.add_argument('--days', type=int, default=DATA_RETENTION_DAYS, help='Days of data to retrieve')
     parser.add_argument('--save-intermediate', action='store_true', 
                        help='Save intermediate results')
+    parser.add_argument('--local', action='store_true',
+                       help='Use existing local data instead of fetching from API')
     
     args = parser.parse_args()
     
     pipeline = FitnessAnalyticsPipeline()
     success = pipeline.run_full_pipeline(
         days_back=args.days,
-        save_intermediate=args.save_intermediate
+        save_intermediate=args.save_intermediate,
+        fetch_new=not args.local
     )
     
     return 0 if success else 1

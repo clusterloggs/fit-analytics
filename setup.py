@@ -39,7 +39,8 @@ def verify_dependencies():
         'numpy',
         'sklearn',
         'streamlit',
-        'plotly'
+        'plotly',
+        'sqlalchemy'
     ]
     
     missing = []

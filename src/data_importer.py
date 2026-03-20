@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 import logging
-from typing import Dict
+from typing import Dict, List
 
 from config import RAW_DATA_DIR
 from google_fit_client import GoogleFitClient
@@ -93,6 +93,41 @@ class FitnessDataImporter:
 
         return saved_files
 
+    # ---------- LOCAL LOAD ----------
+    def load_local_data(self) -> Dict[str, pd.DataFrame]:
+        """Load the most recent raw data files from local storage"""
+        logger.info("Loading raw data from local CSV files...")
+        data_frames = {}
+        
+        if not os.path.exists(RAW_DATA_DIR):
+            logger.warning(f"Raw data directory not found: {RAW_DATA_DIR}")
+            return {}
+
+        # Expected prefixes
+        prefixes = ["steps", "distance", "move_minutes", "calories", "heart_rate", "sleep", "activities"]
+        
+        files = os.listdir(RAW_DATA_DIR)
+        
+        for prefix in prefixes:
+            # Find files starting with prefix (e.g., steps_2023...)
+            matches = [f for f in files if f.startswith(f"{prefix}_") and f.endswith(".csv")]
+            
+            if matches:
+                # Sort descending to get the latest timestamp
+                matches.sort(reverse=True)
+                latest_file = matches[0]
+                file_path = os.path.join(RAW_DATA_DIR, latest_file)
+                
+                try:
+                    df = pd.read_csv(file_path)
+                    data_frames[prefix] = self._convert_to_dataframe(df.to_dict('records'))
+                    logger.info(f"Loaded {prefix} from {latest_file} ({len(df)} records)")
+                except Exception as e:
+                    logger.error(f"Error loading {file_path}: {e}")
+        
+        self.raw_data = data_frames
+        return data_frames
+
     # ---------- HELPERS ----------
     @staticmethod
     def _convert_to_dataframe(data: list) -> pd.DataFrame:
@@ -120,7 +155,6 @@ class FitnessDataImporter:
             "com.google.calories.expended": "calories",
             "com.google.heart_rate.bpm": "heart_rate",
             "com.google.sleep.segment": "sleep",
-            "com.google.weight": "weight",
         }
 
         return mapping.get(data_type, data_type)

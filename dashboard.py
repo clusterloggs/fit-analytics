@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
+from sqlalchemy import create_engine
 from datetime import datetime, timedelta
 import sys
 import os
@@ -14,18 +15,17 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from data_importer import FitnessDataImporter
-from data_cleaner import FitnessDataCleaner
-from data_processor import FitnessDataProcessor
-from predictive_analytics import FitnessPredictor
-from config import PROCESSED_DATA_DIR
-
 # Page configuration
 st.set_page_config(
     page_title="Fitness Analytics Dashboard",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Late import to use updated path
+from config import DATABASE_FILE
+
+logger = logging.getLogger(__name__)
 
 # Custom CSS
 st.markdown("""
@@ -40,63 +40,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def load_data():
-    """Load and cache fitness data"""
+@st.cache_data
+def load_data_from_db():
+    """Load all processed data tables from the SQLite database."""
+    if not os.path.exists(DATABASE_FILE):
+        st.error(f"Database not found at {DATABASE_FILE}. Please run the main pipeline first (`python pipeline.py`).")
+        return None
+    
     try:
-        importer = FitnessDataImporter()
-        data = importer.import_all_data(days_back=30)
-        return data
+        engine = create_engine(f"sqlite:///{DATABASE_FILE}")
+        with engine.connect() as connection:
+            inspector = sqlalchemy.inspect(engine)
+            table_names = inspector.get_table_names()
+            
+            if not table_names:
+                st.warning("Database is empty. Please run the pipeline to populate it.")
+                return {}
+            
+            data = {tbl: pd.read_sql_table(tbl, connection, parse_dates=['date']) for tbl in table_names}
+            logger.info(f"Successfully loaded tables: {', '.join(data.keys())}")
+            st.success(f"Loaded data from tables: {', '.join(table_names)}")
+            return data
     except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return {}
-
-
-def clean_and_process_data(data_dict):
-    """Clean and process raw data"""
-    cleaner = FitnessDataCleaner()
-    processor = FitnessDataProcessor()
-    processed = {}
-    
-    if 'steps' in data_dict and not data_dict['steps'].empty:
-        steps = cleaner.clean_steps(data_dict['steps'])
-        steps = cleaner.remove_duplicates(steps)
-        steps = processor.aggregate_daily(steps, metric='sum')
-        steps = processor.calculate_moving_averages(steps)
-        steps = processor.add_datetime_features(steps)
-        processed['steps'] = steps
-    
-    if 'heart_rate' in data_dict and not data_dict['heart_rate'].empty:
-        hr = cleaner.clean_heart_rate(data_dict['heart_rate'])
-        hr = cleaner.remove_duplicates(hr)
-        hr = processor.aggregate_daily(hr, metric='mean')
-        hr = processor.calculate_moving_averages(hr)
-        hr = processor.add_datetime_features(hr)
-        processed['heart_rate'] = hr
-    
-    if 'sleep' in data_dict and not data_dict['sleep'].empty:
-        sleep = cleaner.clean_sleep(data_dict['sleep'])
-        sleep = cleaner.remove_duplicates(sleep)
-        sleep = processor.aggregate_daily(sleep, metric='mean')
-        sleep = processor.add_datetime_features(sleep)
-        processed['sleep'] = sleep
-    
-    if 'calories' in data_dict and not data_dict['calories'].empty:
-        calories = cleaner.clean_calories(data_dict['calories'])
-        calories = cleaner.remove_duplicates(calories)
-        calories = processor.aggregate_daily(calories, metric='sum')
-        calories = processor.calculate_moving_averages(calories)
-        calories = processor.add_datetime_features(calories)
-        processed['calories'] = calories
-    
-    if 'weight' in data_dict and not data_dict['weight'].empty:
-        weight = cleaner.clean_weight(data_dict['weight'])
-        weight = cleaner.remove_duplicates(weight)
-        weight = processor.aggregate_daily(weight, metric='mean')
-        weight = processor.add_datetime_features(weight)
-        processed['weight'] = weight
-    
-    return processed
+        st.error(f"Failed to load data from database: {e}")
+        return None
 
 
 def plot_metric(df, metric_name, value_col='value'):
@@ -181,31 +148,26 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.header("Settings")
-        days_back = st.slider("Days of History", 7, 90, 30)
-        refresh = st.button("Refresh Data")
-        
-        if refresh:
-            st.cache_resource.clear()
+        st.header("Dashboard Controls")
+        st.info("Run `pipeline.py` to update the data.")
+        if st.button("Reload Data from DB"):
+            st.cache_data.clear()
+            st.rerun()
     
     # Load data
-    st.info("Loading fitness data...")
-    raw_data = load_data()
+    st.info("Loading processed data from database...")
+    processed_data = load_data_from_db()
     
-    if not raw_data:
-        st.warning("No data available. Please ensure Google Fit credentials are configured.")
+    if processed_data is None:
         return
     
-    # Process data
-    processed_data = clean_and_process_data(raw_data)
-    
     if not processed_data:
-        st.warning("No processed data available.")
+        st.warning("No data available to display. Ensure the pipeline has been run successfully.")
         return
     
     # Summary metrics
     st.header("Summary Metrics")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     
     if 'steps' in processed_data:
         stats = calculate_stats(processed_data['steps'])
@@ -231,20 +193,14 @@ def main():
             st.metric("Calories Burned", f"{int(stats['current']):,}",
                      f"{stats['trend_7d']:.1f}% vs 7d avg")
     
-    if 'weight' in processed_data:
-        stats = calculate_stats(processed_data['weight'])
-        with col5:
-            st.metric("Weight (kg)", f"{stats['current']:.1f}",
-                     f"{stats['trend_7d']:.1f}% vs 7d avg")
-    
     st.markdown("---")
     
     # Detailed views
     st.header("Detailed Analysis")
     
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Steps", "Heart Rate", "Sleep", "Calories", "Weight"
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Steps", "Heart Rate", "Sleep", "Calories"
     ])
     
     with tab1:
@@ -342,30 +298,6 @@ def main():
             col4.metric("Std Dev", f"{int(stats['std']):,.0f}")
         else:
             st.info("No calories data available")
-    
-    with tab5:
-        if 'weight' in processed_data:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.plotly_chart(
-                    plot_metric(processed_data['weight'], 'Weight'),
-                    use_container_width=True
-                )
-            with col2:
-                st.plotly_chart(
-                    plot_distribution(processed_data['weight'], 'Weight'),
-                    use_container_width=True
-                )
-            
-            # Stats
-            stats = calculate_stats(processed_data['weight'])
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Average", f"{stats['mean']:.1f} kg")
-            col2.metric("Min", f"{stats['min']:.1f} kg")
-            col3.metric("Max", f"{stats['max']:.1f} kg")
-            col4.metric("Std Dev", f"{stats['std']:.2f}")
-        else:
-            st.info("No weight data available")
     
     
     st.markdown("---")

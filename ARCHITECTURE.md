@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        GOOGLE FIT API                                │
-│              (Steps, Heart Rate, Sleep, Calories, Weight)           │
+│              (Steps, Heart Rate, Calories, Activity, Move Min)           │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
                              ▼

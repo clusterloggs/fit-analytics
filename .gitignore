@@ -4,6 +4,7 @@
 .venv
 env/
 venv/
+fit/
 
 # Google Fit credentials
 credentials.json

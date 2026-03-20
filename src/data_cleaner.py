@@ -77,20 +77,6 @@ class FitnessDataCleaner:
         return df
     
     @staticmethod
-    def clean_weight(df: pd.DataFrame) -> pd.DataFrame:
-        """Clean weight data"""
-        df = df.copy()
-        
-        # Remove null values
-        df = df.dropna(subset=['value'])
-        
-        # Remove impossible values (typical human weight range 30-250 kg)
-        df = df[(df['value'] >= 30) & (df['value'] <= 250)]
-        
-        logger.info(f"Cleaned weight data: {len(df)} records remaining")
-        return df
-    
-    @staticmethod
     def remove_duplicates(df: pd.DataFrame, subset: List[str] = None) -> pd.DataFrame:
         """Remove duplicate records"""
         if subset is None:
